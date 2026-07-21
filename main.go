@@ -84,7 +84,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/history", a.guard(a.getHistory))
 	m.HandleFunc("POST /api/text", a.guard(a.postText))
 	m.HandleFunc("POST /api/upload", a.guard(a.postUpload))
-	m.HandleFunc("GET /api/qrcode", a.guard(a.qrCode))
+	m.HandleFunc("GET /api/qrcode", a.qrCode)
 	m.HandleFunc("GET /ws", a.guard(a.webSocket))
 	m.Handle("GET /uploads/", a.guard(http.StripPrefix("/uploads/", http.FileServer(http.Dir(a.uploadDir))).ServeHTTP))
 	staticFS, _ := fs.Sub(embedded, "static")

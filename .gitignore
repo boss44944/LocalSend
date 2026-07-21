@@ -1,0 +1,7 @@
+clipboard
+clipboard.exe
+dist/
+uploads/
+history.json
+*.tmp
+.DS_Store

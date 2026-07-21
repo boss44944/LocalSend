@@ -147,6 +147,5 @@ jobs:
             gh release create "${VERSION}" dist/* \
               --target "${GITHUB_SHA}" \
               --title "LAN Clipboard ${VERSION}" \
-              --notes-file "${NOTES_FILE}" \
-              --verify-tag
+              --notes-file "${NOTES_FILE}"
           fi

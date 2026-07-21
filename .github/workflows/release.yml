@@ -3,12 +3,10 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [master]
-    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v1.0.0
+        description: Release version, for example v0.1.1
         required: true
         type: string
 
@@ -23,47 +21,3 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Resolve version
-        id: version
-        shell: bash
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then V="${GITHUB_REF_NAME}"; elif [ -n "${INPUT_VERSION}" ]; then V="${INPUT_VERSION}"; else V="v0.1.0"; fi
-          echo "version=${V}" >> "$GITHUB_OUTPUT"
-      - name: Test
-        run: go test ./...
-      - name: Build packages
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -eu
-          mkdir -p dist work
-          build() { GOOS="$1" GOARCH="$2" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$3" .; }
-          build darwin amd64 work/clipboard
-          mkdir -p 'work/LAN Clipboard.app/Contents/MacOS'
-          mv work/clipboard 'work/LAN Clipboard.app/Contents/MacOS/clipboard'
-          (cd work && zip -qr "../dist/lan-clipboard-${VERSION}-macos-intel.zip" 'LAN Clipboard.app')
-          rm -rf 'work/LAN Clipboard.app'
-          build darwin arm64 work/clipboard
-          mkdir -p 'work/LAN Clipboard.app/Contents/MacOS'
-          mv work/clipboard 'work/LAN Clipboard.app/Contents/MacOS/clipboard'
-          (cd work && zip -qr "../dist/lan-clipboard-${VERSION}-macos-apple-silicon.zip" 'LAN Clipboard.app')
-          rm -rf 'work/LAN Clipboard.app'
-          build windows amd64 work/clipboard.exe
-          (cd work && zip -q "../dist/lan-clipboard-${VERSION}-windows-amd64.zip" clipboard.exe)
-          rm work/clipboard.exe
-          build linux amd64 work/clipboard
-          tar -C work -czf "dist/lan-clipboard-${VERSION}-linux-amd64.tar.gz" clipboard
-          (cd dist && sha256sum * > SHA256SUMS.txt)
-      - name: Publish Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" dist/* --clobber
-          else
-            gh release create "$VERSION" dist/* --target "$GITHUB_SHA" --title "LAN Clipboard $VERSION" --generate-notes
-          fi

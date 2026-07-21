@@ -3,11 +3,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [master]
-    paths:
-      - '.github/workflows/release.yml'
-      - 'scripts/prepare-icons.sh'
-      - 'scripts/build-release.sh'
   workflow_dispatch:
     inputs:
       version:
@@ -31,7 +26,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; elif [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="v0.1.3"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; else V="$INPUT_VERSION"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Test
         run: go test ./...

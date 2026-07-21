@@ -3,10 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: [master]
+    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v0.1.1
+        description: Release version, for example v0.1.3
         required: true
         type: string
 
@@ -15,7 +17,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,8 +28,24 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; else V="$INPUT_VERSION"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; elif [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="v0.1.2"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Prepare icons
+        run: |
+          mkdir -p work/icon.iconset
+          base64 --decode assets/app-icon.png.b64 > work/icon.png
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          im=Image.open('work/icon.png').convert('RGBA')
+          im.save('work/app.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+          for n in (16,32,128,256,512):
+              im.resize((n,n),Image.Resampling.LANCZOS).save(f'work/icon.iconset/icon_{n}x{n}.png')
+              if n <= 256:
+                  im.resize((n*2,n*2),Image.Resampling.LANCZOS).save(f'work/icon.iconset/icon_{n}x{n}@2x.png')
+          PY
+          iconutil -c icns work/icon.iconset -o work/AppIcon.icns
+          go install github.com/akavel/rsrc@latest
       - name: Test
         run: go test ./...
       - name: Build packages
@@ -35,12 +53,12 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           set -eu
-          mkdir -p dist work
-          make_app() {
+          mkdir -p dist
+          make_mac() {
             arch="$1"; label="$2"; app="work/LAN Clipboard.app"
-            rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
+            rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             GOOS=darwin GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$app/Contents/MacOS/clipboard" .
-            chmod +x "$app/Contents/MacOS/clipboard"
+            cp work/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
             cat > "$app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,21 +67,26 @@ jobs:
           <key>CFBundleDisplayName</key><string>LAN Clipboard</string>
           <key>CFBundleIdentifier</key><string>com.localsend.lanclipboard</string>
           <key>CFBundleExecutable</key><string>clipboard</string>
+          <key>CFBundleIconFile</key><string>AppIcon</string>
           <key>CFBundlePackageType</key><string>APPL</string>
           <key>CFBundleShortVersionString</key><string>${VERSION#v}</string>
           <key>CFBundleVersion</key><string>${VERSION#v}</string>
           <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict></plist>
           EOF
-            (cd work && zip -qry "../dist/lan-clipboard-${VERSION}-macos-${label}.zip" 'LAN Clipboard.app')
+            chmod +x "$app/Contents/MacOS/clipboard"
+            codesign --force --deep --sign - "$app"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "dist/lan-clipboard-${VERSION}-macos-${label}.zip"
           }
-          make_app amd64 intel
-          make_app arm64 apple-silicon
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o work/clipboard.exe .
-          (cd work && zip -q "../dist/lan-clipboard-${VERSION}-windows-amd64.zip" clipboard.exe)
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o work/clipboard .
-          tar -C work -czf "dist/lan-clipboard-${VERSION}-linux-amd64.tar.gz" clipboard
-          (cd dist && sha256sum * > SHA256SUMS.txt)
+          make_mac amd64 intel
+          make_mac arm64 apple-silicon
+          "$(go env GOPATH)/bin/rsrc" -ico work/app.ico -o rsrc_windows_amd64.syso
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -H=windowsgui' -o work/LAN-Clipboard.exe .
+          rm rsrc_windows_amd64.syso
+          (cd work && zip -q "../dist/lan-clipboard-${VERSION}-windows-amd64.zip" LAN-Clipboard.exe)
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o work/lan-clipboard .
+          tar -C work -czf "dist/lan-clipboard-${VERSION}-linux-amd64.tar.gz" lan-clipboard
+          (cd dist && shasum -a 256 * > SHA256SUMS.txt)
       - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}

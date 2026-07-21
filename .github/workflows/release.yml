@@ -25,4 +25,128 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="${DISPATCH_VERSION}"
+          fi
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must look like v1.0.0" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify source
+        run: |
+          go mod download
+          go test ./...
+          go vet ./...
+
+      - name: Build release archives
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf dist build
+          mkdir -p dist build
+          LDFLAGS="-s -w"
+
+          build_macos_app() {
+            arch="$1"
+            label="$2"
+            root="build/lan-clipboard-${VERSION}-macos-${label}"
+            app="${root}/LAN Clipboard.app"
+            mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
+            CGO_ENABLED=0 GOOS=darwin GOARCH="${arch}" go build -trimpath -ldflags="${LDFLAGS}" -o "${app}/Contents/MacOS/clipboard" .
+            cat > "${app}/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>LAN Clipboard</string>
+          <key>CFBundleDisplayName</key><string>LAN Clipboard</string>
+          <key>CFBundleIdentifier</key><string>com.local.lanclipboard</string>
+          <key>CFBundleVersion</key><string>${VERSION#v}</string>
+          <key>CFBundleShortVersionString</key><string>${VERSION#v}</string>
+          <key>CFBundleExecutable</key><string>clipboard</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict></plist>
+          PLIST
+            cp README.md LICENSE "${root}/"
+            (cd build && zip -qry "../dist/lan-clipboard-${VERSION}-macos-${label}.zip" "lan-clipboard-${VERSION}-macos-${label}")
+          }
+
+          build_macos_app amd64 intel
+          build_macos_app arm64 apple-silicon
+
+          win="build/lan-clipboard-${VERSION}-windows-amd64"
+          mkdir -p "${win}"
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o "${win}/clipboard.exe" .
+          cp README.md LICENSE "${win}/"
+          (cd build && zip -qry "../dist/lan-clipboard-${VERSION}-windows-amd64.zip" "lan-clipboard-${VERSION}-windows-amd64")
+
+          linux="build/lan-clipboard-${VERSION}-linux-amd64"
+          mkdir -p "${linux}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o "${linux}/clipboard" .
+          cp README.md LICENSE "${linux}/"
+          tar -C build -czf "dist/lan-clipboard-${VERSION}-linux-amd64.tar.gz" "lan-clipboard-${VERSION}-linux-amd64"
+
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -lh dist
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lan-clipboard-${{ steps.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          cat > "${NOTES_FILE}" <<EOF
+          ## LAN Clipboard ${VERSION}
+
+          ### Downloads
+
+          - **macOS Apple Silicon**: M1, M2, M3, M4 and newer ARM-based Macs
+          - **macOS Intel**: Intel-based Macs
+          - **Windows**: 64-bit Windows
+          - **Linux**: 64-bit Linux
+
+          Verify downloaded files with \`SHA256SUMS.txt\`.
+
+          See the included README for setup and usage instructions.
+          EOF
+
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release upload "${VERSION}" dist/* --clobber
+          else
+            gh release create "${VERSION}" dist/* \
+              --target "${GITHUB_SHA}" \
+              --title "LAN Clipboard ${VERSION}" \
+              --notes-file "${NOTES_FILE}" \
+              --verify-tag
+          fi

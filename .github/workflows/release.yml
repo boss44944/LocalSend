@@ -3,12 +3,16 @@ name: Release
 on:
   push:
     branches: [master]
-    paths: ['.github/workflows/release.yml']
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/build-release.sh'
+      - 'scripts/prepare-icons.sh'
+      - 'assets/app-icon.png'
     tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example v0.1.4
+        description: Release version, for example v0.1.5
         required: true
         type: string
 
@@ -28,7 +32,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; elif [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="v0.1.4"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then V="$GITHUB_REF_NAME"; elif [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="v0.1.5"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Test
         run: go test ./...
